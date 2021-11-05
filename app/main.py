@@ -32,16 +32,6 @@ except Exception as err:
     print("Error: ", err)
 
 
-def find_post(id):
-    for p in my_posts:
-        if p["id"] == id:
-            return p
-
-def find_index_post(id):
-    for i, v in enumerate(my_posts):
-        if v["id"] == id:
-            return i
-
 @app.get("/")
 def root():
     return {"message": "Hello Stefan"}
