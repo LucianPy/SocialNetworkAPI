@@ -1,3 +1,6 @@
+import psycopg2
+
+from psycopg2.extras import RealDictCursor
 from fastapi import FastAPI, Response, status, HTTPException
 from fastapi.param_functions import Body
 
@@ -14,8 +17,20 @@ class Post(BaseModel):
     published: bool = True
     rating: Optional[int] = None
 
-my_posts = [{"title": "title of post 1", "content": "content of post 1", "id": 1},
-            {"title": "favorite foods", "content": "I like sushi", "id": 2}]
+try:
+    with open("credentials.txt") as f:
+        lines = f.readlines()
+        user, password = lines[0].strip(), lines[1].strip()
+
+    conn = psycopg2.connect(host="localhost", database="SocialNetwork", 
+                            user=user, password=password,
+                            cursor_factory=RealDictCursor)
+    cursor = conn.cursor()
+    print("Database connection was succesful")
+except Exception as err:
+    print("Database connection failed")
+    print("Error: ", err)
+
 
 def find_post(id):
     for p in my_posts:
@@ -33,25 +48,24 @@ def root():
 
 @app.get("/posts")
 def get_posts():
-    return {"data": my_posts}
+    cursor.execute("""SELECT * FROM posts""")
+    posts = cursor.fetchall()
+    return {"data": posts}
 
 @app.post("/posts", status_code=status.HTTP_201_CREATED)
 def create_post(post: Post):
-    post_dict = post.dict()
-    post_dict['id'] = randrange(0, 1000000)
-    my_posts.append(post_dict)
-    
-    return {"data": post_dict}
+    cursor.execute("""INSERT INTO posts (title, content, published) VALUES (%s, %s, %s) RETURNING *""", 
+                  (post.title, post.content, post.published))
 
-@app.get("/posts/latest")
-def get_latests_post():
-    post = my_posts[len(my_posts) - 1]
+    new_post = cursor.fetchone()
+    conn.commit()
     
-    return {"detail": post}
+    return {"data": new_post}
 
 @app.get("/posts/{id}")
 def get_post(id: int):
-    post = find_post(id)
+    cursor.execute("""SELECT * FROM posts WHERE id = %s""", (str(id)))
+    post = cursor.fetchone()
 
     if not post:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, 
@@ -61,26 +75,25 @@ def get_post(id: int):
 
 @app.delete("/posts/{id}")
 def delete_post(id: int):
-    index = find_index_post(id)
+    cursor.execute("""DELETE FROM posts WHERE id = %s RETURNING *""", (str(id)))
+    deleted_post = cursor.fetchone()
+    conn.commit()
 
-    if index is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                            detail=f"post with id: {id} does not exist")
-
-    my_posts.pop(index)
+    if deleted_post == None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, 
+                            detail=f"post with id: {id} was not found")
     
-    return {"message": "post deleted succesfully"}
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 @app.put("/posts/{id}")
 def update_post(id: int, post: Post):
-    index = find_index_post(id)
-
-    if index is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                            detail=f"post with id: {id} does not exist")
+    cursor.execute("""UPDATE posts SET title = %s, content = %s, published = %s WHERE id = %s RETURNING *""", (post.title, post.content, post.published, str(id)))
     
-    post_dict = post.dict()
-    post_dict['id'] = id
-    my_posts[index] = post_dict
+    updated_post = cursor.fetchone()
+    conn.commit()
 
-    return {"data": post_dict}
+    if updated_post == None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, 
+                            detail=f"post with id: {id} was not found")
+
+    return {"data": updated_post}
